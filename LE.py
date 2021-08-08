@@ -6,6 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import warnings
 import networkx as nx
 
+import math
 class LE:
     
     def __init__(self, X:np.ndarray, dim:int, k:int = 2, eps = None, graph:str = 'k-nearest', weights:str = 'heat kernel', 
@@ -131,8 +132,8 @@ class LE:
         # Check for connectivity
         self._G = self._W.copy() # Adjacency matrix
         self._G[self._G > 0] = 1
-        G = nx.from_numpy_matrix(self._G)
-        self.cc = nx.number_connected_components(G) # Multiplicity of lambda = 0
+        self.G = nx.from_numpy_matrix(self._G)
+        self.cc = nx.number_connected_components(self.G) # Multiplicity of lambda = 0
         if self.cc != 1:
             warnings.warn("Graph is not fully connected, Laplacian Eigenmaps may not work as expected")
             
@@ -153,7 +154,7 @@ class LE:
         self._Ls = d_tilde @ ( self._L @ d_tilde )
         return self._Ls
     
-    def transform(self):
+    def transform(self, eig=False):
         """
         Compute embedding
         """
@@ -173,8 +174,11 @@ class LE:
             
         order = np.argsort(eigval)
         self.Y = eigvec[:, order[self.cc:self.cc+self.dim + 1]]
-            
-        return self.Y
+
+        if eig == True:
+            return eigval, eigvec
+        else:
+            return self.Y
     
     def plot_embedding_2d(self, colors, grid = True, dim_1 = 1, dim_2 = 2, cmap = None, size = (15, 10)):
         if self.dim < 2 and dim_2 <= self.dim and dim_1 <= self.dim:
@@ -219,3 +223,146 @@ class LE:
         ax.set_ylabel('Coordinate {}'.format(dim_2))
         ax.set_zlabel('Coordinate {}'.format(dim_3))
         plt.show()
+
+    def scalingParameter(self):
+        '''
+        Determine scaling parameter m of scale-free network.
+        '''
+        k = []
+        Pk = []
+
+        for node in list(self.G.nodes()):
+            degree = self.G.degree(nbunch=node)
+            try:        
+                pos = k.index(degree)
+            except ValueError as e:     
+                k.append(degree)
+                Pk.append(1)
+            else:
+                Pk[pos] += 1
+
+        # get a double log representation
+        logk = []
+        logPk = []
+        for i in range(len(k)):
+            logk.append(math.log10(k[i]))
+            logPk.append(math.log10(Pk[i]))
+
+        order = np.argsort(logk)
+        logk_array = np.array(logk)[order]
+        logPk_array = np.array(logPk)[order]
+        #plt.plot(logk_array, logPk_array, ".")
+        m, c = np.polyfit(logk_array, logPk_array, 1)
+        #plt.plot(logk_array, m*logk_array + c, "-")
+        print('Scaling Parameter', m)
+        return m
+
+    def sortedKeys(self):
+        '''
+        Nodes sorted decreasingly by degree.
+        '''
+        dictNodes = self.G.degree()
+        sortedNodes = {k: v for k, v in sorted(dict(dictNodes).items(), key=lambda item: item[1])}
+        sortedKeys = list(reversed(list(sortedNodes.keys())))
+        return sortedKeys
+    
+    def pol2cart(self, rho, phi):
+        x = [a*b for a,b in zip(rho, np.cos(phi))]
+        y = [a*b for a,b in zip(rho,np.sin(phi))]
+        return x, y
+
+    def hyperEmbedding(self):
+        '''
+        Convert Cartesian to polar coordinates.
+        '''
+        # angular position
+        thetas = np.arctan(self.Y[:,0]/self.Y[:,1]) 
+
+        # radial distance from origin (hierarchy based on node degree)
+        gamma = self.scalingParameter()
+        beta = 1/(gamma-1)
+        N = self.G.number_of_nodes()
+        radii = np.zeros(N)
+        n = 1
+        sortedKeys = self.sortedKeys()
+        for i in sortedKeys:
+            radii[i-1] = 2*beta*np.log(n) + 2*(1-beta)*np.log(N)
+            n += 1
+
+        return thetas, radii
+    
+    def plotHyper(self, colors, annotate=False):
+        print('Plotting...')
+        self.colors = colors #colors
+        thetas, radii = self.hyperEmbedding()
+        x, y = self.pol2cart(radii,thetas)
+
+        fig = plt.figure() #Here is your error
+
+        ax1 = fig.add_subplot(1,2,1)
+        ax1.scatter(x, y, c=self.colors, cmap='jet') #colors
+        if annotate==True:
+            for i in range(len(x)):
+                ax1.annotate(i, (x[i], y[i]))
+        
+        ax2 = fig.add_subplot(1,2,2,projection='polar')
+        #colors = thetas
+        ax2.scatter(thetas, radii, c=self.colors, cmap='jet', alpha=0.75)
+        ax2.set_yticklabels([])
+        ax2.set_theta_zero_location('N')
+        if annotate==True:
+            for i in range(len(radii)):
+                ax2.annotate(i, xy=(thetas[i], radii[i]))
+
+        plt.savefig('plotHyper.png')
+
+class Align:
+
+    def __init__(self, A, B, labels, mu=0.5, graph = 'eps', weights = 'heat kernel', sigma = 5, laplacian = 'symmetrized'):
+        self.A = A
+        self.B = B
+        self.labels = labels
+
+        self.graph = graph
+        self.weights = weights
+        self.sigma = sigma
+        self.laplacian = laplacian
+        leX = LE(A, dim = 1, graph = self.graph, weights = self.weights, sigma = self.sigma, laplacian = self.laplacian) 
+        leX_eigval, leX_eigvec = leX.transform(eig=True)
+        leY = LE(B, dim = 1, graph = self.graph, weights = self.weights, sigma = self.sigma, laplacian = self.laplacian) 
+        leY_eigval, leY_eigvec = leY.transform(eig=True)
+        self.Gx = leX.G
+        self.Gy = leY.G
+
+        self.Lx = leX_eigvec
+        self.Ly = leY_eigvec
+        self.Ux = self.U_x(self.Gx,self.labels,mu)
+        self.Uy = self.U_x(self.Gy,self.labels,mu)
+        self.Uxy = self.U_xy(self.Gx,self.Gy,self.labels,mu)
+        self.Uyx = self.U_xy(self.Gy,self.Gx,self.labels,mu)
+
+    def U_x(self,g,l,mu):
+        u = [v for v in list(g.nodes()) if v not in l]
+        Ux = np.zeros((len(list(g.nodes())),len(list(g.nodes()))))
+        for i in range(len(u)):
+            for j in range(len(l)):
+                if (list(g.nodes)[i] == list(g.nodes)[j]) & (list(g.nodes)[i] in l):
+                    Ux[i,j] = mu
+        return Ux
+
+    def U_xy(self,gx,gy,l,mu):
+        u = [v for v in list(gx.nodes()) if v not in l]
+        Uxy = np.zeros((len(list(gx.nodes())),len(list(gy.nodes()))))
+        for i in range(len(list(gx.nodes()))):
+            for j in range(len(list(gy.nodes()))):
+                if (list(gx.nodes)[i] == list(gy.nodes)[j]) & (list(gx.nodes)[i] in l):
+                    Uxy[i,j] = mu
+        return Uxy
+
+    def jointLaplacian(self):
+        '''
+        Joint Laplacian.
+        '''
+        Lz = np.concatenate((np.concatenate((self.Lx+self.Ux,-self.Uxy),axis=1),
+                            np.concatenate((-self.Uyx,self.Ly+self.Uy),axis=1)),axis=0)
+        return Lz
