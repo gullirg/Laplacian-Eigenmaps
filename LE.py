@@ -180,7 +180,7 @@ class LE:
         else:
             return self.Y
     
-    def plot_embedding_2d(self, colors, grid = True, dim_1 = 1, dim_2 = 2, cmap = None, size = (15, 10)):
+    def plot_embedding_2d(self, colors='b', grid = True, dim_1 = 1, dim_2 = 2, cmap = None, size = (15, 10)):
         if self.dim < 2 and dim_2 <= self.dim and dim_1 <= self.dim:
             raise ValueError("There's not enough coordinates")
         
@@ -200,7 +200,7 @@ class LE:
         plt.title(title)
         plt.xlabel('Coordinate {}'.format(dim_1))
         plt.ylabel('Coordinate {}'.format(dim_2))
-        plt.show()
+        plt.savefig('plot2D.png')
     
     def plot_embedding_3d(self, colors, grid = True, dim_1 = 1, dim_2 = 2, dim_3 = 3, cmap = None, size = (15, 10)):
         if self.dim < 3 and dim_2 <= self.dim and dim_1 <= self.dim and dim_3 <= self.dim:
@@ -276,7 +276,7 @@ class LE:
         Convert Cartesian to polar coordinates.
         '''
         # angular position
-        thetas = np.arctan(self.Y[:,0]/self.Y[:,1]) 
+        thetas = 2*np.arctan(self.Y[:,0]/self.Y[:,1]) 
 
         # radial distance from origin (hierarchy based on node degree)
         gamma = self.scalingParameter()
@@ -291,7 +291,7 @@ class LE:
 
         return thetas, radii
     
-    def plotHyper(self, colors, annotate=False):
+    def plotHyper(self, colors='b', annotate=False):
         print('Plotting...')
         self.colors = colors #colors
         thetas, radii = self.hyperEmbedding()
