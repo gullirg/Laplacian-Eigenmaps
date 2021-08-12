@@ -7,6 +7,8 @@ import warnings
 import networkx as nx
 
 import math
+from scipy import spatial
+import pandas as pd
 class LE:
     
     def __init__(self, X:np.ndarray, dim:int, k:int = 2, eps = None, graph:str = 'k-nearest', weights:str = 'heat kernel', 
@@ -118,7 +120,7 @@ class LE:
         if self.graph == 'k-nearest':
             nn_matrix = np.argsort(dist_matrix, axis = 1)[:, 1 : self.k + 1]
         elif self.graph == 'eps':
-            nn_matrix = np.array([ [index for index, d in enumerate(dist_matrix[i,:]) if d < self.eps and index != i] for i in range(self.n) ])
+            nn_matrix = np.array([ [index for index, d in enumerate(dist_matrix[i,:]) if d < self.eps and index != i] for i in range(self.n) ], dtype=object)
         # Weight matrix
         self._W = []
         for i in range(self.n):
@@ -190,8 +192,8 @@ class LE:
         plt.axvline(c = 'black', alpha = 0.2)
         if cmap is None:
             plt.scatter(self.Y[:, dim_1 - 1], self.Y[:, dim_2 - 1], c = colors)
-            
-        plt.scatter(self.Y[:, dim_1 - 1], self.Y[:, dim_2 - 1], c = colors, cmap=cmap)
+        else:    
+            plt.scatter(self.Y[:, dim_1 - 1], self.Y[:, dim_2 - 1], c = colors, cmap=cmap)
         plt.grid(grid)
         if self.graph == 'k-nearest':
             title = 'LE with k = {} and weights = {}'.format(self.k, self.weights)
@@ -276,7 +278,7 @@ class LE:
         Convert Cartesian to polar coordinates.
         '''
         # angular position
-        thetas = 2*np.arctan(self.Y[:,0]/self.Y[:,1]) 
+        thetas = 2*np.arctan(self.Y[:,0]/abs(self.Y[:,1])) 
 
         # radial distance from origin (hierarchy based on node degree)
         gamma = self.scalingParameter()
@@ -297,6 +299,8 @@ class LE:
         thetas, radii = self.hyperEmbedding()
         x, y = self.pol2cart(radii,thetas)
 
+        pd.DataFrame(zip(x,y)).to_csv("hyperCoord.csv", header=None, index=None) 
+
         fig = plt.figure() #Here is your error
 
         ax1 = fig.add_subplot(1,2,1)
@@ -309,7 +313,6 @@ class LE:
         #colors = thetas
         ax2.scatter(thetas, radii, c=self.colors, cmap='jet', alpha=0.75)
         ax2.set_yticklabels([])
-        ax2.set_theta_zero_location('N')
         if annotate==True:
             for i in range(len(radii)):
                 ax2.annotate(i, xy=(thetas[i], radii[i]))
@@ -366,3 +369,84 @@ class Align:
         Lz = np.concatenate((np.concatenate((self.Lx+self.Ux,-self.Uxy),axis=1),
                             np.concatenate((-self.Uyx,self.Ly+self.Uy),axis=1)),axis=0)
         return Lz
+
+    def embedJointLaplacian(self):
+        Lz = self.jointLaplacian()
+        eigval, eigvec = np.linalg.eig(Lz)
+        
+        order = np.argsort(eigval)
+        orderEigvec = eigvec[:, order]
+        Y = orderEigvec[:,1:len(order)]
+
+        return Y
+
+    def findCorrespondences(self, hyper=False, dims=None):
+        '''
+        dims: dimensionality of the low-dimensional embedding of Lz
+        '''
+        Lz = self.jointLaplacian()
+
+        if hyper==True:
+            print('Hyperbolic embedding')
+            Y = self.hyperEmbedding()
+        else:
+            print('Euclidean embedding')
+            Y = self.embedJointLaplacian()
+
+        if dims==None:
+            dims=len(Y[0,:]-1)
+
+        Y1 = Y[0:len(self.A[:,0]),0:dims]
+        Y2 = Y[len(self.A[:,0]):,0:dims]
+
+        treeY1 = spatial.KDTree(Y1)
+        pairs=[]
+        for i in range(len(Y2[:,0])):
+            pairs.append([i, treeY1.query(Y2[i,:])[1]]) # Such a query takes a vector and returns the closest neighbor in Y1 for it
+        
+        count=0
+        for i in range(len(np.array(pairs)[:,0])):
+	        if np.array(pairs)[i,0] == np.array(pairs)[i,1]:
+		        count += 1
+        print(count,'/',len(np.array(pairs)[:,0]),' correct.')
+
+        #return pairs
+    
+    def hyperEmbedding(self):
+        '''
+        Convert Cartesian to polar coordinates.
+        '''
+        Lz = self.jointLaplacian()
+        Y = self.embedJointLaplacian()
+        # angular position
+        thetas = 2*np.arctan(Y[:,0]/abs(Y[:,1])) 
+
+        # radial distance from origin (hierarchy based on node degree)
+        gamma = 3 #TO BE IMPLEMENTED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! self.scalingParameter()
+        beta = 1/(gamma-1)
+        N = len(Y[:,0])
+        radii = np.zeros(N)
+        n = 1
+        sortedKeys = self.sortedKeys(Lz)
+        for i in sortedKeys:
+            radii[i-1] = 2*beta*np.log(n) + 2*(1-beta)*np.log(N)
+            n += 1
+
+        x, y = self.pol2cart(radii,thetas)
+        hyperY = np.array([list(a) for a in zip(x,y)])
+        return hyperY
+
+    def pol2cart(self, rho, phi):
+        x = [a*b for a,b in zip(rho, np.cos(phi))]
+        y = [a*b for a,b in zip(rho,np.sin(phi))]
+        return x, y
+
+    def sortedKeys(self,Lz):
+        '''
+        Nodes sorted decreasingly by degree.
+        '''
+        diag = np.diagonal(Lz)
+        dictNodes = {k:v for k,v in enumerate(diag)}
+        sortedNodes = {k: v for k, v in sorted(dict(dictNodes).items(), key=lambda item: item[1])}
+        sortedKeys = list(reversed(list(sortedNodes.keys())))
+        return sortedKeys
