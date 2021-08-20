@@ -321,7 +321,7 @@ class LE:
 
 class Align:
 
-    def __init__(self, A, B, labels, mu=0.5, graph = 'eps', weights = 'heat kernel', sigma = 5, laplacian = 'symmetrized'):
+    def __init__(self, A, B, labels, mu=1000, graph = 'eps', weights = 'heat kernel', sigma = 5, laplacian = 'symmetrized'):
         self.A = A
         self.B = B
         self.labels = labels
@@ -380,18 +380,20 @@ class Align:
 
         return Y
 
-    def findCorrespondences(self, hyper=False, dims=None):
+    def findCorrespondences(self, hyper=False, dims=None, gamma=5):
         '''
         dims: dimensionality of the low-dimensional embedding of Lz
         '''
         Lz = self.jointLaplacian()
 
         if hyper==True:
-            print('Hyperbolic embedding')
-            Y = self.hyperEmbedding()
+            #print('Hyperbolic embedding')
+            Y = self.hyperEmbedding(gamma=gamma)
+            norm=1
         else:
-            print('Euclidean embedding')
+            #print('Euclidean embedding')
             Y = self.embedJointLaplacian()
+            norm=2
 
         if dims==None:
             dims=len(Y[0,:]-1)
@@ -399,7 +401,7 @@ class Align:
         Y1 = Y[0:len(self.A[:,0]),0:dims]
         Y2 = Y[len(self.A[:,0]):,0:dims]
 
-        treeY1 = spatial.KDTree(Y1)
+        treeY1 = spatial.KDTree(Y1, metric='minkowski',p=norm)
         pairs=[]
         for i in range(len(Y2[:,0])):
             pairs.append([i, treeY1.query(Y2[i,:])[1]]) # Such a query takes a vector and returns the closest neighbor in Y1 for it
@@ -408,21 +410,22 @@ class Align:
         for i in range(len(np.array(pairs)[:,0])):
 	        if np.array(pairs)[i,0] == np.array(pairs)[i,1]:
 		        count += 1
-        print(count,'/',len(np.array(pairs)[:,0]),' correct.')
-
-        #return pairs
+        #print(count,'/',len(np.array(pairs)[:,0]),' correct.')
+        percentage = count/len(np.array(pairs)[:,0])
+        return  percentage #pairs
     
-    def hyperEmbedding(self):
+    def hyperEmbedding(self,gamma=5):
         '''
         Convert Cartesian to polar coordinates.
         '''
         Lz = self.jointLaplacian()
         Y = self.embedJointLaplacian()
         # angular position
-        thetas = 2*np.arctan(Y[:,0]/abs(Y[:,1])) 
+        #thetas = 2*np.arctan(Y[:,0]/abs(Y[:,1])) 
+        thetas = np.arctan(Y[:,0]/Y[:,1]) 
 
         # radial distance from origin (hierarchy based on node degree)
-        gamma = 3 #TO BE IMPLEMENTED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! self.scalingParameter()
+        gamma = 5 #TO BE IMPLEMENTED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! self.scalingParameter()
         beta = 1/(gamma-1)
         N = len(Y[:,0])
         radii = np.zeros(N)
